@@ -135,7 +135,7 @@ jobs:
           echo "xclip-${{ matrix.arch }}  $(sha256sum xclip-${{ matrix.arch }} | cut -d' ' -f1)" >> checksums-${{ matrix.arch }}.txt
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-${{ matrix.arch }}
           path: |
@@ -164,7 +164,7 @@ jobs:
           fetch-depth: 0 # Need full history for changelog
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
 
