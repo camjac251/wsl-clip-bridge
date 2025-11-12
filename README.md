@@ -90,9 +90,15 @@ sudo mv xclip-${ARCH} /usr/local/bin/xclip
 ```bash
 git clone https://github.com/camjac251/wsl-clip-bridge
 cd wsl-clip-bridge
-cargo build --release --locked
-sudo install -m 755 target/release/xclip /usr/local/bin/
+
+# Build statically linked musl binary (works on any Linux, no GLIBC dependency)
+rustup target add x86_64-unknown-linux-musl  # or aarch64-unknown-linux-musl for ARM64
+cargo build --release --target x86_64-unknown-linux-musl --locked
+sudo install -m 755 target/x86_64-unknown-linux-musl/release/xclip /usr/local/bin/
 ```
+
+> [!NOTE]
+> Binaries are statically linked using musl libc for maximum compatibility across Linux systems.
 
 </details>
 

@@ -26,8 +26,9 @@ WSL Clip Bridge is a secure xclip replacement for WSL that enables clipboard sha
 # Development build
 cargo build
 
-# Release build (optimized, with LTO)
-cargo build --release --locked
+# Release build (statically linked musl binary, no GLIBC dependency)
+rustup target add x86_64-unknown-linux-musl  # or aarch64-unknown-linux-musl for ARM64
+cargo build --release --target x86_64-unknown-linux-musl --locked
 
 # Format code
 cargo fmt
@@ -105,8 +106,9 @@ max_file_size_mb = <megabytes>   # Maximum file size limit
 ## Release Process
 
 GitHub Actions workflow (`release.yml`) handles multi-architecture builds:
-- Targets: `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`
-- Cross-compilation for ARM64 using `aarch64-linux-gnu-gcc`
+- Targets: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`
+- Statically linked musl binaries (no GLIBC dependency)
+- Works on any Linux system regardless of GLIBC version
 - Binary stripping for size optimization
 - Automatic checksum generation
 

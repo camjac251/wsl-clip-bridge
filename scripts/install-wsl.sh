@@ -100,20 +100,37 @@ if [ ! -d "$PROJECT_DIR" ]; then
     exit 1
 fi
 
-# Build the project
-print_step "Building wsl-clip-bridge..."
+# Detect architecture and set target
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+    TARGET="x86_64-unknown-linux-musl"
+    BINARY_PATH="target/x86_64-unknown-linux-musl/release/xclip"
+elif [ "$ARCH" = "aarch64" ]; then
+    TARGET="aarch64-unknown-linux-musl"
+    BINARY_PATH="target/aarch64-unknown-linux-musl/release/xclip"
+else
+    print_error "Unsupported architecture: $ARCH"
+    exit 1
+fi
+
+# Add musl target if not already installed
+print_step "Adding musl target for $ARCH..."
+rustup target add $TARGET
+
+# Build the project with musl for static linking
+print_step "Building wsl-clip-bridge (static musl binary)..."
 cd "$PROJECT_DIR"
-cargo build --release --locked
+cargo build --release --target $TARGET --locked
 
 # Check if build was successful
-if [ ! -f "target/release/xclip" ]; then
-    print_error "Build failed. Binary not found at target/release/xclip"
+if [ ! -f "$BINARY_PATH" ]; then
+    print_error "Build failed. Binary not found at $BINARY_PATH"
     exit 1
 fi
 
 # Strip the binary to reduce size
 print_step "Stripping binary to reduce size..."
-strip target/release/xclip
+strip "$BINARY_PATH"
 
 # Create install directory if it doesn't exist
 if [ "$INSTALL_LOCATION" = "system" ]; then
@@ -127,10 +144,10 @@ fi
 # Install the binary
 print_step "Installing xclip to $INSTALL_DIR..."
 if [ "$INSTALL_LOCATION" = "system" ]; then
-    sudo cp "target/release/xclip" "$INSTALL_DIR/"
+    sudo cp "$BINARY_PATH" "$INSTALL_DIR/"
     sudo chmod +x "$INSTALL_DIR/xclip"
 else
-    cp "target/release/xclip" "$INSTALL_DIR/"
+    cp "$BINARY_PATH" "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/xclip"
 fi
 
