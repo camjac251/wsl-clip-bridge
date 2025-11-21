@@ -12,7 +12,7 @@
 param(
     [switch]$SkipShareX,
     [switch]$AutoConfirm,
-    [ValidatePattern('^$|^[a-zA-Z0-9_-]+$')]
+    [ValidatePattern('^$|^[a-zA-Z0-9_.-]+$')]
     [string]$WSLDistribution = ""
 )
 
@@ -153,7 +153,7 @@ if ($WSLDistribution) {
 # Validate selected distribution name for security
 function Test-DistributionName {
     param([string]$Name)
-    return $Name -match '^[a-zA-Z0-9_-]+$'
+    return $Name -match '^[a-zA-Z0-9_.-]+$'
 }
 
 if (-not $selectedDist) {
@@ -209,7 +209,7 @@ if (-not $selectedDist) {
 # Final validation of distribution name
 if ($selectedDist -and -not (Test-DistributionName $selectedDist)) {
     Write-Err "Invalid distribution name format: $selectedDist"
-    Write-Host "    Distribution names should only contain letters, numbers, hyphens, and underscores" -ForegroundColor Gray
+    Write-Host "    Distribution names should only contain letters, numbers, hyphens, underscores, and dots" -ForegroundColor Gray
     if (-not $AutoConfirm) {
         Read-Host "`nPress Enter to exit"
     }
