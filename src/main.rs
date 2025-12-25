@@ -600,42 +600,39 @@ fn is_file_fresh(path: &Path, ttl: Duration) -> bool {
 const WL_CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Run a command with a timeout, killing it if it takes too long
-fn run_command_with_timeout(mut cmd: Command, timeout: Duration) -> io::Result<std::process::Output> {
+fn run_command_with_timeout(
+    mut cmd: Command,
+    timeout: Duration,
+) -> io::Result<std::process::Output> {
     let mut child = cmd.spawn()?;
 
     let start = std::time::Instant::now();
     loop {
-        match child.try_wait()? {
-            Some(status) => {
-                // Process finished, collect output
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut out) = child.stdout.take() {
-                    out.read_to_end(&mut stdout)?;
-                }
-                if let Some(mut err) = child.stderr.take() {
-                    err.read_to_end(&mut stderr)?;
-                }
-                return Ok(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
+        if let Some(status) = child.try_wait()? {
+            // Process finished, collect output
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            if let Some(mut out) = child.stdout.take() {
+                out.read_to_end(&mut stdout)?;
             }
-            None => {
-                if start.elapsed() > timeout {
-                    // Timeout exceeded, kill the process
-                    let _ = child.kill();
-                    let _ = child.wait(); // Reap the zombie
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Command timed out",
-                    ));
-                }
-                // Sleep briefly before checking again
-                std::thread::sleep(Duration::from_millis(50));
+            if let Some(mut err) = child.stderr.take() {
+                err.read_to_end(&mut stderr)?;
             }
+            return Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            });
         }
+
+        if start.elapsed() > timeout {
+            // Timeout exceeded, kill the process
+            let _ = child.kill();
+            let _ = child.wait(); // Reap the zombie
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "Command timed out"));
+        }
+        // Sleep briefly before checking again
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
