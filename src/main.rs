@@ -22,6 +22,40 @@ struct Args {
     input_file: Option<String>,
 }
 
+const VERSION: &str = match option_env!("WSL_CLIP_BRIDGE_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+fn print_help() {
+    println!(
+        "wsl-clip-bridge {VERSION} - Clipboard bridge for WSL (xclip replacement)
+
+USAGE:
+    xclip [OPTIONS]
+
+OPTIONS:
+    -i [FILE]       Read input into clipboard (default mode)
+    -o              Output clipboard contents
+    -t <MIME>       Specify MIME type (e.g., image/png, text/plain)
+    -selection <S>  Selection type: clipboard, primary, secondary
+    -h, --help      Show this help message
+    -V, --version   Show version
+
+EXAMPLES:
+    xclip -o                      # Output text from clipboard
+    xclip -t TARGETS -o           # List available clipboard formats
+    xclip -t image/png -o > img   # Save clipboard image to file
+    cat file.txt | xclip -i       # Copy text to clipboard
+    xclip -t image/png -i < img   # Copy image to clipboard
+
+CONFIG:
+    ~/.config/wsl-clip-bridge/config.toml
+
+For more info: https://github.com/camjac251/wsl-clip-bridge"
+    );
+}
+
 fn parse_args() -> Args {
     let mut selection = String::from("clipboard");
     let mut mime_type: Option<String> = None;
@@ -31,6 +65,14 @@ fn parse_args() -> Args {
     let mut it = env::args().skip(1).peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("wsl-clip-bridge {VERSION}");
+                std::process::exit(0);
+            }
             "-selection" => {
                 if let Some(val) = it.next() {
                     selection = val;

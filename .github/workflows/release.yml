@@ -84,6 +84,7 @@ jobs:
     outputs:
       sha_short: ${{ steps.commit.outputs.SHA_SHORT }}
       commit_message: ${{ steps.commit.outputs.MESSAGE }}
+      version_tag: ${{ steps.commit.outputs.VERSION_TAG }}
 
     strategy:
       matrix:
@@ -104,9 +105,13 @@ jobs:
           # Escape commit message to prevent injection
           MESSAGE=$(git log -1 --pretty=%s | sed 's/[\"$`\\]/\\&/g')
           echo "MESSAGE=$MESSAGE" >> "$GITHUB_OUTPUT"
+          # Generate version tag
+          echo "VERSION_TAG=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Build with cross
         uses: houseabsolute/actions-rust-cross@v1
+        env:
+          WSL_CLIP_BRIDGE_VERSION: ${{ steps.commit.outputs.VERSION_TAG }}
         with:
           command: build
           target: ${{ matrix.target }}
@@ -180,7 +185,7 @@ jobs:
 
       - name: Generate Release Tag
         id: tag
-        run: echo "TAG=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        run: echo "TAG=${{ needs.build.outputs.version_tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Changelog
         id: changelog
