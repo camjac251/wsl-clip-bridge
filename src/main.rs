@@ -638,28 +638,52 @@ fn is_file_fresh(path: &Path, ttl: Duration) -> bool {
 
 // wl-clipboard integration functions
 
-/// Default timeout for wl-paste commands (2 seconds)
-const WL_CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(2);
+/// Timeout for wl-paste commands (5 seconds)
+const WL_CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Run a command with a timeout, killing it if it takes too long
 fn run_command_with_timeout(
     mut cmd: Command,
     timeout: Duration,
 ) -> io::Result<std::process::Output> {
+    use std::sync::mpsc;
+    use std::thread;
+
     let mut child = cmd.spawn()?;
 
+    // Take ownership of stdout/stderr handles before spawning threads
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    // Spawn thread to read stdout (prevents pipe buffer deadlock)
+    let (stdout_tx, stdout_rx) = mpsc::channel();
+    let stdout_handle = thread::spawn(move || {
+        let mut stdout = Vec::new();
+        if let Some(mut out) = child_stdout {
+            let _ = out.read_to_end(&mut stdout);
+        }
+        let _ = stdout_tx.send(stdout);
+    });
+
+    // Spawn thread to read stderr
+    let (stderr_tx, stderr_rx) = mpsc::channel();
+    let stderr_handle = thread::spawn(move || {
+        let mut stderr = Vec::new();
+        if let Some(mut err) = child_stderr {
+            let _ = err.read_to_end(&mut stderr);
+        }
+        let _ = stderr_tx.send(stderr);
+    });
+
+    // Wait for process with timeout
     let start = std::time::Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
-            // Process finished, collect output
-            let mut stdout = Vec::new();
-            let mut stderr = Vec::new();
-            if let Some(mut out) = child.stdout.take() {
-                out.read_to_end(&mut stdout)?;
-            }
-            if let Some(mut err) = child.stderr.take() {
-                err.read_to_end(&mut stderr)?;
-            }
+            // Process finished, collect output from threads
+            let _ = stdout_handle.join();
+            let _ = stderr_handle.join();
+            let stdout = stdout_rx.recv().unwrap_or_default();
+            let stderr = stderr_rx.recv().unwrap_or_default();
             return Ok(std::process::Output {
                 status,
                 stdout,
@@ -671,6 +695,9 @@ fn run_command_with_timeout(
             // Timeout exceeded, kill the process
             let _ = child.kill();
             let _ = child.wait(); // Reap the zombie
+            // Clean up threads
+            let _ = stdout_handle.join();
+            let _ = stderr_handle.join();
             return Err(io::Error::new(io::ErrorKind::TimedOut, "Command timed out"));
         }
         // Sleep briefly before checking again
