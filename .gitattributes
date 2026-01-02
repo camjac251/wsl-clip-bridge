@@ -7,29 +7,18 @@
 # ================================
 # Source Code
 # ================================
-# Rust files
-*.rs            text eol=lf
-*.toml          text eol=lf
-Cargo.lock      text eol=lf
-Cargo.toml      text eol=lf
+*.rs            text eol=lf diff=rust
+*.toml          text eol=lf diff=toml
+Cargo.lock      text eol=lf -diff linguist-generated
 
 # ================================
 # Scripts
 # ================================
 # Shell scripts must use LF endings (for WSL/Linux)
 *.sh            text eol=lf
-*.bash          text eol=lf
-*.fish          text eol=lf
-*.zsh           text eol=lf
 
 # PowerShell scripts use CRLF (Windows native)
 *.ps1           text eol=crlf
-*.psm1          text eol=crlf
-*.psd1          text eol=crlf
-
-# Batch files use CRLF (Windows native)
-*.bat           text eol=crlf
-*.cmd           text eol=crlf
 
 # ================================
 # Configuration Files
@@ -37,40 +26,12 @@ Cargo.toml      text eol=lf
 *.json          text eol=lf
 *.yaml          text eol=lf
 *.yml           text eol=lf
-*.xml           text eol=lf
-*.ini           text eol=lf
-*.cfg           text eol=lf
-*.conf          text eol=lf
-.editorconfig   text eol=lf
-.gitignore      text eol=lf
-.gitattributes  text eol=lf
-rustfmt.toml    text eol=lf
-clippy.toml     text eol=lf
 
 # ================================
 # Documentation
 # ================================
-*.md            text eol=lf
-*.txt           text eol=lf
-*.rst           text eol=lf
-README          text eol=lf
+*.md            text eol=lf diff=markdown
 LICENSE         text eol=lf
-CHANGELOG       text eol=lf
-AUTHORS         text eol=lf
-CONTRIBUTING    text eol=lf
-CLAUDE.md       text eol=lf
-
-# ================================
-# Web Assets (future-proofing)
-# ================================
-*.html          text eol=lf
-*.css           text eol=lf
-*.js            text eol=lf
-*.ts            text eol=lf
-*.jsx           text eol=lf
-*.tsx           text eol=lf
-*.vue           text eol=lf
-*.svg           text eol=lf
 
 # ================================
 # Binary Files
@@ -81,82 +42,38 @@ CLAUDE.md       text eol=lf
 *.jpeg          binary
 *.gif           binary
 *.webp          binary
-*.ico           binary
-*.bmp           binary
 
 # Archives
+*.zip           binary
+*.gz            binary
 *.tar           binary
 *.tar.gz        binary
-*.tar.bz2       binary
-*.tar.xz        binary
-*.zip           binary
-*.7z            binary
-*.rar           binary
-*.gz            binary
-*.bz2           binary
-*.xz            binary
 
 # Executables
 *.exe           binary
-*.dll           binary
 *.so            binary
-*.dylib         binary
-*.bin           binary
-*.o             binary
-*.a             binary
-*.lib           binary
-
-# Fonts
-*.ttf           binary
-*.otf           binary
-*.woff          binary
-*.woff2         binary
-*.eot           binary
-
-# Documents
-*.pdf           binary
-*.doc           binary
-*.docx          binary
-*.xls           binary
-*.xlsx          binary
-*.ppt           binary
-*.pptx          binary
 
 # ================================
 # GitHub Linguist Overrides
 # ================================
-# Ensure proper language detection
 *.rs            linguist-language=Rust
-*.toml          linguist-language=TOML
-*.ps1           linguist-language=PowerShell
-scripts/*       linguist-documentation=false
+
+# Exclude from language stats
+*.ps1           linguist-detectable=false
 
 # Mark generated files
-target/*        linguist-generated=true
-
-# Vendored dependencies (if any)
-# vendor/*      linguist-vendored=true
-
-# ================================
-# Diff Settings
-# ================================
-# Better diff output for specific file types
-*.rs            diff=rust
-*.toml          diff=toml
-*.md            diff=markdown
+Cargo.lock      linguist-generated
+target/*        linguist-generated
 
 # ================================
 # Export Ignore
 # ================================
-# Files/folders to exclude from archive exports
+# Files/folders to exclude from archive exports (cargo package)
 .github         export-ignore
 .gitignore      export-ignore
 .gitattributes  export-ignore
-.editorconfig   export-ignore
-/tests          export-ignore
-/benches        export-ignore
-/examples       export-ignore
-*.md            export-ignore
+lefthook.yml    export-ignore
+mise.toml       export-ignore
+renovate.json   export-ignore
 rustfmt.toml    export-ignore
-clippy.toml     export-ignore
 CLAUDE.md       export-ignore
