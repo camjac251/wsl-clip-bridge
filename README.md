@@ -107,7 +107,28 @@ Windows Clipboard → wl-clipboard (WSLg) → xclip → Application
 
 ## Configuration
 
-Config auto-creates at `~/.config/wsl-clip-bridge/config.toml` on first run:
+Config location: `~/.config/wsl-clip-bridge/config.toml`
+
+**Setup options:**
+
+```bash
+# Option 1: Let it auto-create on first run
+xclip -t TARGETS -o
+
+# Option 2: Copy the example config
+mkdir -p ~/.config/wsl-clip-bridge
+curl -fsSL https://raw.githubusercontent.com/camjac251/wsl-clip-bridge/main/config/config.toml.example \
+  -o ~/.config/wsl-clip-bridge/config.toml
+
+# Option 3: Create manually
+mkdir -p ~/.config/wsl-clip-bridge
+cat > ~/.config/wsl-clip-bridge/config.toml << 'EOF'
+ttl_secs = 300
+max_image_dimension = 1568
+EOF
+```
+
+**Full options:**
 
 ```toml
 # Clipboard data TTL in seconds (default: 300)
