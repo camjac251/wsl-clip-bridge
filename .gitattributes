@@ -60,6 +60,7 @@ LICENSE         text eol=lf
 
 # Exclude from language stats
 *.ps1           linguist-detectable=false
+*.sh            linguist-detectable=false
 
 # Mark generated files
 Cargo.lock      linguist-generated
