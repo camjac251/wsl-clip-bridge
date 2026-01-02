@@ -1,4 +1,5 @@
 # WSL Clip Bridge Configuration
+# Copy to: ~/.config/wsl-clip-bridge/config.toml
 
 # Clipboard data TTL in seconds (default: 300)
 ttl_secs = 300
@@ -11,10 +12,17 @@ max_image_dimension = 1568
 # Maximum file size in MB (default: 100)
 max_file_size_mb = 100
 
+# Clipboard integration mode
+# "auto" = Check wl-clipboard first, fall back to files (default)
+# "file_only" = Only use file-based clipboard (ShareX mode)
+clipboard_mode = "auto"
+
+# Cache images from wl-clipboard for faster subsequent access
+cache_wl_images = true
+
 # Security: Directory access restrictions
 # If not configured, all paths are allowed
 # To restrict access to specific directories (and their subdirectories):
-#
 # allowed_directories = [
 #   "/mnt/c/Users/YOUR_USERNAME/Documents/ShareX",
 #   "/home/YOUR_USERNAME",

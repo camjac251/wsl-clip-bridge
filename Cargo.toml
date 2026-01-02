@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.92"
 description = "Secure xclip replacement for WSL clipboard sharing"
 repository = "https://github.com/camjac251/wsl-clip-bridge"
+license = "MIT"
 keywords = ["wsl", "clipboard", "xclip", "sharex"]
 categories = ["command-line-utilities", "os::windows-apis"]
 
