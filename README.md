@@ -7,17 +7,40 @@ A secure xclip replacement for WSL that enables clipboard sharing between Window
 
 ## Installation
 
-### Option 1: Download Binary (Recommended)
+### Option 1: mise (Recommended)
+
+If you use [mise](https://mise.jdx.dev/) for tool management:
+
+```bash
+# Install globally
+mise use -g "github:camjac251/wsl-clip-bridge@latest"
+
+# Or add to ~/.config/mise/config.toml
+```
+
+```toml
+[tools]
+"github:camjac251/wsl-clip-bridge" = { version = "latest", bin = "xclip" }
+```
+
+### Option 2: Download Binary
 
 ```bash
 # Detect architecture and download
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 curl -fsSL "https://github.com/camjac251/wsl-clip-bridge/releases/latest/download/xclip-${ARCH}" -o xclip
 chmod +x xclip
+
+# System-wide (requires sudo)
 sudo mv xclip /usr/local/bin/
+
+# Or user-local (no sudo)
+mkdir -p ~/.local/bin
+mv xclip ~/.local/bin/
+# Ensure ~/.local/bin is in your PATH
 ```
 
-### Option 2: Build from Source
+### Option 3: Build from Source
 
 Requires Rust 1.89+:
 
@@ -28,12 +51,17 @@ cd wsl-clip-bridge
 # Static musl build (no glibc dependency)
 rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl --locked
+
+# System-wide
 sudo install -m 755 target/x86_64-unknown-linux-musl/release/xclip /usr/local/bin/
+
+# Or user-local
+install -m 755 target/x86_64-unknown-linux-musl/release/xclip ~/.local/bin/
 ```
 
 For ARM64, use `aarch64-unknown-linux-musl` instead.
 
-### Option 3: PowerShell Installer (Windows)
+### Option 4: PowerShell Installer (Windows)
 
 Automated setup with optional ShareX integration:
 
