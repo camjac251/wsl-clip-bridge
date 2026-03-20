@@ -1,100 +1,70 @@
-# ========================================
-# Continuous Integration Workflow
-# ========================================
-# Runs on every push to main and on pull requests
-# Validates code quality, formatting, and tests
-
 name: CI
 
-# ========================================
-# Triggers
-# ========================================
 on:
   push:
     branches: [main]
     paths-ignore:
-      - "scripts/**"
-      - "**.md"
+      - "*.md"
       - "LICENSE"
       - ".gitignore"
-
+      - "scripts/**"
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
     paths-ignore:
-      - "scripts/**"
-      - "**.md"
+      - "*.md"
       - "LICENSE"
       - ".gitignore"
+      - "scripts/**"
 
-  merge_group:
-    branches: [main]
-
-# ========================================
-# Environment Variables
-# ========================================
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
-# ========================================
-# Concurrency Control
-# ========================================
-# Cancel in-progress runs when a new commit is pushed
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# ========================================
-# Jobs
-# ========================================
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     permissions:
       contents: read
-
     steps:
-      # --------------------------------------------------
-      # Setup
-      # --------------------------------------------------
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      # --------------------------------------------------
-      # Code Quality Checks
-      # --------------------------------------------------
-      - name: Check code formatting
+      - name: Format
         run: cargo fmt -- --check
 
-      - name: Run clippy lints
+      - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      # --------------------------------------------------
-      # Tests
-      # --------------------------------------------------
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Test
+        run: cargo test --all-features
 
-      # --------------------------------------------------
-      # Build Verification
-      # --------------------------------------------------
-      - name: Build debug binary
-        run: cargo build --verbose
+      - name: Check binary size
+        run: |
+          cargo build --release
+          SIZE=$(stat -c%s target/release/xclip)
+          echo "Binary size: $SIZE bytes ($(( SIZE / 1024 / 1024 ))MB)"
+          if [ "$SIZE" -gt 7000000 ]; then
+            echo "::error::Binary size exceeds 7MB"
+            exit 1
+          fi
 
-      - name: Build release binary
-        run: cargo build --release --verbose
+  msrv:
+    name: MSRV (1.92)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features

@@ -1,8 +1,24 @@
+min_version: 1.11.0
+
 pre-commit:
+  parallel: false
   commands:
     fmt:
+      run: cargo fmt
       glob: "*.rs"
-      run: cargo fmt --check
+      stage_fixed: true
+      priority: 1
     clippy:
-      glob: "*.rs"
       run: cargo clippy --all-targets --all-features -- -D warnings
+      glob: "*.rs"
+      priority: 2
+
+pre-push:
+  parallel: false
+  commands:
+    clippy:
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      priority: 1
+    test:
+      run: cargo test --all-features
+      priority: 2

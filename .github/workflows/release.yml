@@ -1,243 +1,156 @@
-# ========================================
-# Release Workflow
-# ========================================
-# Automatically creates releases when code changes are pushed to main
-# Builds binaries for multiple architectures (x64 and ARM64)
-
 name: Release
 
-# ========================================
-# Triggers
-# ========================================
 on:
-  # Manual trigger from GitHub UI
-  workflow_dispatch:
-
-  # Automatic trigger on code changes
   push:
     branches: [main]
-    paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and upload binaries for (e.g. v1.0.0)"
+        required: true
 
-# ========================================
-# Environment Variables
-# ========================================
 env:
   CARGO_TERM_COLOR: always
+  BINARY_NAME: xclip
 
-# ========================================
-# Concurrency Control
-# ========================================
-# Prevent concurrent releases
-concurrency:
-  group: release
-  cancel-in-progress: false
-
-# ========================================
-# Jobs
-# ========================================
 jobs:
-  # --------------------------------------------------
-  # Job 1: Validate Code Quality
-  # --------------------------------------------------
-  validate:
-    name: Validate Code
+  release-plz-pr:
+    name: Release PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v6
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0.5
         with:
-          cache-on-failure: true
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check formatting
-        run: cargo fmt -- --check
+  release:
+    name: Release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      tag: ${{ steps.extract.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Run tests
-        run: cargo test --verbose
+      - uses: release-plz/action@v0.5
+        id: release-plz
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --------------------------------------------------
-  # Job 2: Build Release Binaries
-  # --------------------------------------------------
+      - name: Extract tag
+        id: extract
+        if: steps.release-plz.outputs.releases_created == 'true'
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          TAG=$(echo "$RELEASES" | jq -r '.[0].tag')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
   build:
-    name: Build Release - ${{ matrix.target }}
-    needs: validate
+    name: Build - ${{ matrix.arch }}
+    needs: release
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.release.outputs.releases_created == 'true') ||
+      github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
-    outputs:
-      sha_short: ${{ steps.commit.outputs.SHA_SHORT }}
-      commit_message: ${{ steps.commit.outputs.MESSAGE }}
-      version_tag: ${{ steps.commit.outputs.VERSION_TAG }}
-
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
-            arch: amd64
+            os: ubuntu-latest
+            arch: linux-x86_64
           - target: aarch64-unknown-linux-musl
-            arch: arm64
-
+            os: ubuntu-latest
+            arch: linux-arm64
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Get commit info
-        id: commit
-        run: |
-          echo "SHA_SHORT=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          # Escape commit message to prevent injection
-          MESSAGE=$(git log -1 --pretty=%s | sed 's/[\"$`\\]/\\&/g')
-          echo "MESSAGE=$MESSAGE" >> "$GITHUB_OUTPUT"
-          # Generate version tag
-          echo "VERSION_TAG=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.tag || inputs.tag }}
 
       - name: Build with cross
         uses: houseabsolute/actions-rust-cross@v1
-        env:
-          WSL_CLIP_BRIDGE_VERSION: ${{ steps.commit.outputs.VERSION_TAG }}
         with:
           command: build
           target: ${{ matrix.target }}
           args: "--locked --release"
           strip: true
 
-      - name: Create tarball and checksums
+      - name: Package binary and tarball
         run: |
-          # Create package directory
+          SRC="target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
+          # Bare binary with arch suffix
+          cp "$SRC" "${{ env.BINARY_NAME }}-${{ matrix.arch }}"
+          # Tarball with scripts, config, and README
           mkdir -p wsl-clip-bridge
-          cp target/${{ matrix.target }}/release/xclip wsl-clip-bridge/
-          cp -r scripts wsl-clip-bridge/
-          cp -r config wsl-clip-bridge/
-          cp README.md wsl-clip-bridge/
-          tar czf wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz wsl-clip-bridge
+          cp "$SRC" wsl-clip-bridge/
+          cp -r scripts config README.md wsl-clip-bridge/
+          tar czf "wsl-clip-bridge-${{ matrix.arch }}.tar.gz" wsl-clip-bridge
 
-          # Copy binary with architecture suffix
-          cp target/${{ matrix.target }}/release/xclip xclip-${{ matrix.arch }}
-
-          # Create checksums
-          sha256sum wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz > wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz.sha256
-          sha256sum xclip-${{ matrix.arch }} > xclip-${{ matrix.arch }}.sha256
-
-          # Create combined checksums file
-          cat wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz.sha256 > checksums-${{ matrix.arch }}.txt
-          echo "xclip-${{ matrix.arch }}  $(sha256sum xclip-${{ matrix.arch }} | cut -d' ' -f1)" >> checksums-${{ matrix.arch }}.txt
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
-          name: release-${{ matrix.arch }}
+          name: ${{ matrix.arch }}
           path: |
-            wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz
-            wsl-clip-bridge-linux-${{ matrix.arch }}.tar.gz.sha256
-            checksums-${{ matrix.arch }}.txt
-            xclip-${{ matrix.arch }}
-            xclip-${{ matrix.arch }}.sha256
+            ${{ env.BINARY_NAME }}-${{ matrix.arch }}
+            wsl-clip-bridge-${{ matrix.arch }}.tar.gz
 
-  # --------------------------------------------------
-  # Job 3: Create GitHub Release
-  # --------------------------------------------------
-  release:
-    name: Create Release
-    needs: build
+  upload:
+    name: Upload Binaries
+    needs: [release, build]
+    if: >-
+      always() &&
+      needs.build.result == 'success' &&
+      ((github.event_name == 'push' && needs.release.outputs.releases_created == 'true') ||
+      github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     permissions:
       contents: write
-
+      id-token: write
+      attestations: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0 # Need full history for changelog
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          merge-multiple: true
 
-      - name: Prepare release files
-        run: |
-          mkdir -p release
-          # Move all artifacts to release directory
-          mv artifacts/release-amd64/* release/
-          mv artifacts/release-arm64/* release/
-          # Combine checksums
-          cat release/checksums-*.txt > release/checksums.txt
-          rm release/checksums-*.txt
-
-      - name: Generate Release Tag
-        id: tag
-        run: echo "TAG=${{ needs.build.outputs.version_tag }}" >> "$GITHUB_OUTPUT"
-
-      - name: Generate Changelog
-        id: changelog
-        run: |
-          # Get the last release tag
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
-          if [ -z "$LAST_TAG" ]; then
-            echo "CHANGES=Initial release" >> "$GITHUB_OUTPUT"
-          else
-            # Generate changelog from commits since last tag
-            CHANGES=$(git log $LAST_TAG..HEAD --pretty=format:"- %s" --no-merges | head -20)
-
-            # If no changes, set a default message
-            if [ -z "$CHANGES" ]; then
-              CHANGES="- No significant changes"
-            fi
-
-            # Escape for GitHub output
-            echo "CHANGES<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$CHANGES" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
         with:
-          tag_name: ${{ steps.tag.outputs.TAG }}
-          name: Release ${{ steps.tag.outputs.TAG }}
-          body: |
-            Drop-in xclip replacement for WSL → Perfect for [Claude Code](https://claude.ai/code) screenshot pasting!
+          subject-path: 'artifacts/*'
 
-            ## What's Changed
-            ${{ steps.changelog.outputs.CHANGES }}
-
-            ## Downloads
-
-            | Architecture | Full Package | Binary Only |
-            |--------------|--------------|-------------|
-            | **x64/AMD64** (most users) | [wsl-clip-bridge-linux-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/wsl-clip-bridge-linux-amd64.tar.gz) | [xclip-amd64](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/xclip-amd64) |
-            | **ARM64** | [wsl-clip-bridge-linux-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/wsl-clip-bridge-linux-arm64.tar.gz) | [xclip-arm64](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/xclip-arm64) |
-
-            📦 **[Installation Instructions](https://github.com/${{ github.repository }}#-quick-start)** • 📖 **[Full Documentation](https://github.com/${{ github.repository }}#readme)** • ✅ **[Verify with checksums.txt](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.TAG }}/checksums.txt)**
-          files: |
-            release/wsl-clip-bridge-linux-amd64.tar.gz
-            release/wsl-clip-bridge-linux-amd64.tar.gz.sha256
-            release/wsl-clip-bridge-linux-arm64.tar.gz
-            release/wsl-clip-bridge-linux-arm64.tar.gz.sha256
-            release/xclip-amd64
-            release/xclip-amd64.sha256
-            release/xclip-arm64
-            release/xclip-arm64.sha256
-            release/checksums.txt
-          draft: false
-          prerelease: false
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag || inputs.tag }}
+        run: gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber

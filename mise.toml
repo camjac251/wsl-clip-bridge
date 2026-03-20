@@ -1,3 +1,6 @@
 [tools]
-rust = "latest"
+rust = "stable"
 lefthook = "latest"
+
+[hooks]
+enter = "lefthook install"
