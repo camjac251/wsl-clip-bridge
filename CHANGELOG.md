@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.0](https://github.com/camjac251/wsl-clip-bridge/compare/v1.0.1...v1.1.0) - 2026-03-20
+
+### Added
+
+- *(ci)* add homebrew tap auto-update to release workflow
+
+### Other
+
+- Merge pull request #23 from camjac251/renovate/image-0.x-lockfile
+- Merge pull request #24 from camjac251/renovate/toml-1.x-lockfile
+
 ## [1.0.1](https://github.com/camjac251/wsl-clip-bridge/compare/v1.0.0...v1.0.1) - 2026-03-20
 
 ### Fixed
