@@ -154,3 +154,49 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release.outputs.tag || inputs.tag }}
         run: gh release upload "$TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  update-homebrew:
+    name: Update Homebrew Tap
+    needs: [release, build, upload]
+    if: needs.upload.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate token for homebrew-tap
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: camjac251
+          repositories: homebrew-tap
+
+      - uses: actions/checkout@v6
+        with:
+          repository: camjac251/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+          ref: main
+
+      - name: Update formula
+        env:
+          TAG: ${{ needs.release.outputs.tag || inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          SHA1=$(sha256sum artifacts/xclip-linux-arm64 | cut -d' ' -f1)
+          SHA2=$(sha256sum artifacts/xclip-linux-x86_64 | cut -d' ' -f1)
+
+          homebrew-tap/scripts/update-formula.sh \
+            homebrew-tap/Formula/wsl-clip-bridge.rb \
+            "$VERSION" "$SHA1" "$SHA2"
+
+          cd homebrew-tap
+          git config user.name "brew-bottler[bot]"
+          git config user.email "brew-bottler[bot]@users.noreply.github.com"
+          git add Formula/wsl-clip-bridge.rb
+          git diff --cached --quiet || { git commit -m "wsl-clip-bridge $VERSION" && git push; }
