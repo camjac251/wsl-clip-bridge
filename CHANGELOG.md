@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.1](https://github.com/camjac251/wsl-clip-bridge/compare/v1.0.0...v1.0.1) - 2026-03-20
+
+### Fixed
+
+- *(release)* add git_release_enable and git_tag_enable to release-plz
+
+### Other
+
+- release v1.0.0
+
 ## [1.0.0](https://github.com/camjac251/wsl-clip-bridge/releases/tag/v1.0.0) - 2026-03-20
 
 ### Added
