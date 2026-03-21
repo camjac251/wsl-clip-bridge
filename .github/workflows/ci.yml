@@ -68,3 +68,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-features
+
+  auto-merge-release:
+    name: Auto-merge release PR
+    needs: [test, msrv]
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-plz-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Merge release PR
+        run: gh pr merge ${{ github.event.pull_request.number }} --merge --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Trigger release workflow
+        run: gh workflow run release.yml --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
