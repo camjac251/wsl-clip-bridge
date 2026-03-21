@@ -7,21 +7,19 @@ A secure xclip replacement for WSL that enables clipboard sharing between Window
 
 ## Installation
 
-### Option 1: mise (Recommended)
-
-If you use [mise](https://mise.jdx.dev/) for tool management:
+### Option 1: Homebrew (Recommended)
 
 ```bash
-# Install globally
-mise use -g "github:camjac251/wsl-clip-bridge@latest"
-
-# Or add to ~/.config/mise/config.toml
+brew install camjac251/tap/wsl-clip-bridge
 ```
 
-```toml
-[tools]
-"github:camjac251/wsl-clip-bridge" = { version = "latest", bin = "xclip" }
+Upgrades work normally after the initial install:
+
+```bash
+brew upgrade wsl-clip-bridge
 ```
+
+Formulas are updated automatically when new releases are published.
 
 ### Option 2: Download Binary
 
