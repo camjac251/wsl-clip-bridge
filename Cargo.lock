@@ -322,7 +322,7 @@ checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
 
 [[package]]
 name = "wsl-clip-bridge"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "image",
  "serde",
