@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.1](https://github.com/camjac251/wsl-clip-bridge/compare/v1.1.0...v1.1.1) - 2026-04-01
+
+### Fixed
+
+- *(ci)* remove redundant workflow_dispatch that races with push
+
+### Other
+
+- auto-merge release-plz PRs and trigger release
+- replace mise with Homebrew as recommended install method
+
 ## [1.1.0](https://github.com/camjac251/wsl-clip-bridge/compare/v1.0.1...v1.1.0) - 2026-03-20
 
 ### Added
