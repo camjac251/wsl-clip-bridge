@@ -187,27 +187,23 @@ fn print_targets() {
     {
         for typ in types {
             match typ.as_str() {
-                "image/bmp" => {
-                    // Only advertise PNG conversion for BMP
-                    if !printed.contains("image/png") {
-                        println!("image/png");
-                        printed.insert("image/png".to_string());
+                // Only advertise PNG conversion for BMP
+                "image/bmp" if !printed.contains("image/png") => {
+                    println!("image/png");
+                    printed.insert("image/png".to_string());
+                }
+                "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+                    if !printed.contains(&typ) =>
+                {
+                    println!("{typ}");
+                    printed.insert(typ.clone());
+                    if typ == "image/jpeg" && !printed.contains("image/jpg") {
+                        println!("image/jpg");
+                        printed.insert("image/jpg".to_string());
                     }
                 }
-                "image/png" | "image/jpeg" | "image/gif" | "image/webp" => {
-                    if !printed.contains(&typ) {
-                        println!("{typ}");
-                        printed.insert(typ.clone());
-                        if typ == "image/jpeg" && !printed.contains("image/jpg") {
-                            println!("image/jpg");
-                            printed.insert("image/jpg".to_string());
-                        }
-                    }
-                }
-                t if t.starts_with("text/") => {
-                    if printed.insert(typ.clone()) {
-                        println!("{typ}");
-                    }
+                t if t.starts_with("text/") && printed.insert(typ.clone()) => {
+                    println!("{typ}");
                 }
                 _ => {}
             }
@@ -623,7 +619,7 @@ fn load_ttl() -> Duration {
         return Duration::from_secs(secs.min(86_400));
     }
     // default 5 minutes
-    Duration::from_secs(300)
+    Duration::from_mins(5)
 }
 
 fn is_file_fresh(path: &Path, ttl: Duration) -> bool {
@@ -719,8 +715,7 @@ fn wl_clipboard_available() -> bool {
     Command::new("which")
         .arg("wl-paste")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 
 fn get_wl_clipboard_types() -> io::Result<Vec<String>> {
