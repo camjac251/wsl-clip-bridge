@@ -78,3 +78,5 @@ mise.toml       export-ignore
 renovate.json   export-ignore
 rustfmt.toml    export-ignore
 CLAUDE.md       export-ignore
+AGENTS.md       export-ignore
+GEMINI.md       export-ignore

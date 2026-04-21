@@ -3,11 +3,11 @@ name = "wsl-clip-bridge"
 version = "1.1.1"
 edition = "2024"
 rust-version = "1.92"
-description = "Secure xclip replacement for WSL clipboard sharing"
+description = "Claude Code paste helper for WSL: decodes WSLg BMPs into PNG via xclip shim"
 repository = "https://github.com/camjac251/wsl-clip-bridge"
 license = "MIT"
-keywords = ["wsl", "clipboard", "xclip", "sharex"]
-categories = ["command-line-utilities", "os::windows-apis"]
+keywords = ["wsl", "clipboard", "xclip", "claude-code", "wslg"]
+categories = ["command-line-utilities"]
 
 [profile.release]
 opt-level = "s"
@@ -19,9 +19,7 @@ name = "xclip"
 path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-toml = "1.0"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
 
 [lints.rust]
 unsafe_code = "forbid"

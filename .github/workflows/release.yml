@@ -116,10 +116,10 @@ jobs:
           SRC="target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}"
           # Bare binary with arch suffix
           cp "$SRC" "${{ env.BINARY_NAME }}-${{ matrix.arch }}"
-          # Tarball with scripts, config, and README
+          # Tarball with binary + README
           mkdir -p wsl-clip-bridge
           cp "$SRC" wsl-clip-bridge/
-          cp -r scripts config README.md wsl-clip-bridge/
+          cp README.md wsl-clip-bridge/
           tar czf "wsl-clip-bridge-${{ matrix.arch }}.tar.gz" wsl-clip-bridge
 
       - uses: actions/upload-artifact@v7
@@ -193,12 +193,13 @@ jobs:
           TAG: ${{ needs.release.outputs.tag || inputs.tag }}
         run: |
           VERSION="${TAG#v}"
-          SHA1=$(sha256sum artifacts/xclip-linux-arm64 | cut -d' ' -f1)
-          SHA2=$(sha256sum artifacts/xclip-linux-x86_64 | cut -d' ' -f1)
+          # Positional args to update-formula.sh: version, then arm64 sha, then x86_64 sha.
+          SHA_ARM64=$(sha256sum artifacts/xclip-linux-arm64 | cut -d' ' -f1)
+          SHA_X86_64=$(sha256sum artifacts/xclip-linux-x86_64 | cut -d' ' -f1)
 
           homebrew-tap/scripts/update-formula.sh \
             homebrew-tap/Formula/wsl-clip-bridge.rb \
-            "$VERSION" "$SHA1" "$SHA2"
+            "$VERSION" "$SHA_ARM64" "$SHA_X86_64"
 
           cd homebrew-tap
           git config user.name "brew-bottler[bot]"
