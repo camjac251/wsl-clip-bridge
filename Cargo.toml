@@ -13,6 +13,8 @@ categories = ["command-line-utilities"]
 opt-level = "s"
 lto = true
 codegen-units = 1
+strip = "symbols"
+panic = "abort"
 
 [[bin]]
 name = "xclip"

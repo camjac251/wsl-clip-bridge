@@ -13,7 +13,7 @@ Everything else (per-model image caps, Lanczos3 resize, compression ladder, API 
 - Package: `wsl-clip-bridge` (binary output: `xclip`)
 - Edition: 2024, MSRV 1.92
 - Single dependency: `image` crate with `default-features = false` and only `png` + `bmp` features
-- Release profile: size-optimized (`opt-level = "s"`), LTO, `codegen-units = 1`
+- Release profile: size-optimized (`opt-level = "s"`), LTO, `codegen-units = 1`, `strip = "symbols"`, `panic = "abort"`
 
 ## Build
 
@@ -70,7 +70,7 @@ GitHub Actions (`release.yml`) handles:
 
 ## Testing
 
-- `cargo test` runs the hermetic BMP -> PNG round-trip test (one real test, no fixtures).
+- `cargo test` runs hermetic unit tests: BMP -> PNG conversion (`BI_RGB` plus the `BI_BITFIELDS` variant WSLg emits, with pixel-channel assertions), `TARGETS` advertisement rules, and arg parsing. BMP bytes are built in the test module; no fixture files.
 - Smoke test the installed binary against a real WSLg clipboard:
 
   ```bash

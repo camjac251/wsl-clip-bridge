@@ -8,7 +8,7 @@
 
 use std::env;
 use std::io::{self, Cursor, Read, Write};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,7 +20,52 @@ const VERSION: &str = match option_env!("WSL_CLIP_BRIDGE_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
+/// Budget for a single `wl-paste` invocation, spawn to exit.
 const WL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How often the child is polled for exit. Claude Code runs up to four xclip
+/// calls per paste, so the poll interval bounds the latency each call adds.
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+/// Extra time the pipe readers get to deliver data after the child has
+/// exited. EOF is immediate then, unless something else (e.g. a grandchild
+/// process) still holds the child's pipe open.
+const READER_GRACE: Duration = Duration::from_secs(1);
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+enum Cli {
+    Help,
+    Version,
+    Run(Request),
+}
+
+struct Request {
+    mime: Option<String>,
+    output: bool,
+}
+
+fn parse_args<I: Iterator<Item = String>>(mut args: I) -> Cli {
+    let mut request = Request {
+        mime: None,
+        output: false,
+    };
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-h" | "--help" => return Cli::Help,
+            "-V" | "--version" => return Cli::Version,
+            "-selection" => {
+                args.next(); // consume value, ignore (xclip compat)
+            }
+            "-t" => request.mime = args.next(),
+            "-o" => request.output = true,
+            _ => {}
+        }
+    }
+    Cli::Run(request)
+}
 
 fn print_help() {
     println!(
@@ -50,121 +95,103 @@ Source: https://github.com/camjac251/wsl-clip-bridge"
     );
 }
 
-struct Args {
-    mime: Option<String>,
-    output: bool,
-}
-
-fn parse_args() -> Args {
-    let mut args = Args {
-        mime: None,
-        output: false,
-    };
-    let mut it = env::args().skip(1);
-    while let Some(arg) = it.next() {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                print_help();
-                std::process::exit(0);
-            }
-            "-V" | "--version" => {
-                println!("wsl-clip-bridge {VERSION}");
-                std::process::exit(0);
-            }
-            "-selection" => {
-                it.next(); // consume value, ignore
-            }
-            "-t" => {
-                args.mime = it.next();
-            }
-            "-o" => {
-                args.output = true;
-            }
-            _ => {}
-        }
-    }
-    args
-}
-
 fn main() -> ExitCode {
-    let args = parse_args();
-    if !args.output {
-        eprintln!(
-            "xclip: write mode (-i) is not implemented. This is a read-only Claude Code paste shim."
-        );
-        return ExitCode::from(1);
+    match parse_args(env::args().skip(1)) {
+        Cli::Help => {
+            print_help();
+            ExitCode::SUCCESS
+        }
+        Cli::Version => {
+            println!("wsl-clip-bridge {VERSION}");
+            ExitCode::SUCCESS
+        }
+        Cli::Run(request) => match run(&request) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("xclip: {e}");
+                ExitCode::FAILURE
+            }
+        },
     }
-    let code = match args.mime.as_deref() {
+}
+
+fn run(request: &Request) -> io::Result<()> {
+    if !request.output {
+        return Err(io::Error::other(
+            "write mode (-i) is not implemented. This is a read-only Claude Code paste shim.",
+        ));
+    }
+    match request.mime.as_deref() {
         Some("TARGETS") => print_targets(),
-        Some(m) => output(m),
+        Some(mime) => output(mime),
         None => output("text/plain"),
-    };
-    ExitCode::from(u8::try_from(code).unwrap_or(1))
+    }
 }
 
 // ---------------------------------------------------------------------------
 // wl-paste runner
 // ---------------------------------------------------------------------------
 
-fn run_wl_paste(extra_args: &[&str]) -> io::Result<Vec<u8>> {
-    let mut cmd = Command::new("wl-paste");
-    cmd.args(extra_args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+fn run_wl_paste(args: &[&str]) -> io::Result<Vec<u8>> {
+    wl_paste_inner(args)
+        .map_err(|e| io::Error::other(format!("wl-paste {} failed: {e}", args.join(" "))))
+}
 
-    let mut child = cmd.spawn()?;
-    let child_stdout = child.stdout.take();
-    let child_stderr = child.stderr.take();
+fn wl_paste_inner(args: &[&str]) -> io::Result<Vec<u8>> {
+    let mut child = Command::new("wl-paste")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
 
     // Drain both pipes from dedicated threads so neither can deadlock the
     // child by filling its kernel pipe buffer.
-    let (stdout_tx, stdout_rx) = mpsc::channel();
-    let (stderr_tx, stderr_rx) = mpsc::channel();
-    let stdout_reader = thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut out) = child_stdout {
-            let _ = out.read_to_end(&mut buf);
-        }
-        let _ = stdout_tx.send(buf);
-    });
-    let stderr_reader = thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut err) = child_stderr {
-            let _ = err.read_to_end(&mut buf);
-        }
-        let _ = stderr_tx.send(buf);
-    });
+    let stdout_rx = spawn_reader(child.stdout.take());
+    let stderr_rx = spawn_reader(child.stderr.take());
 
-    let start = Instant::now();
-    loop {
+    let deadline = Instant::now() + WL_TIMEOUT;
+    let status = loop {
         if let Some(status) = child.try_wait()? {
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
-            let stdout = stdout_rx.recv().unwrap_or_default();
-            let stderr = stderr_rx.recv().unwrap_or_default();
-            if status.success() {
-                return Ok(stdout);
-            }
-            let stderr_text = String::from_utf8_lossy(&stderr);
-            let trimmed = stderr_text.trim();
-            return Err(io::Error::other(if trimmed.is_empty() {
-                format!("wl-paste exited with {status}")
-            } else {
-                format!("wl-paste exited with {status}: {trimmed}")
-            }));
+            break status;
         }
-        if start.elapsed() > WL_TIMEOUT {
+        if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "wl-paste timed out after 5s",
+                format!("timed out after {}s", WL_TIMEOUT.as_secs()),
             ));
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(POLL_INTERVAL);
+    };
+
+    let stdout = stdout_rx.recv_timeout(READER_GRACE).unwrap_or_default();
+    let stderr = stderr_rx.recv_timeout(READER_GRACE).unwrap_or_default();
+    if status.success() {
+        return Ok(stdout);
     }
+    let stderr = String::from_utf8_lossy(&stderr);
+    let stderr = stderr.trim();
+    Err(io::Error::other(if stderr.is_empty() {
+        format!("exited with {status}")
+    } else {
+        format!("exited with {status}: {stderr}")
+    }))
+}
+
+/// Read a child pipe to EOF on a dedicated thread and hand the bytes back
+/// through a channel.
+fn spawn_reader<R: Read + Send + 'static>(pipe: Option<R>) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
 }
 
 fn wl_list_types() -> io::Result<Vec<String>> {
@@ -183,102 +210,99 @@ fn wl_fetch(mime: &str) -> io::Result<Vec<u8>> {
 // xclip verbs
 // ---------------------------------------------------------------------------
 
-fn print_targets() -> i32 {
-    let types = match wl_list_types() {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("xclip: wl-paste --list-types failed: {e}");
-            return 1;
-        }
-    };
-    let has_bmp = types.iter().any(|t| t == "image/bmp");
-    let has_png = types.iter().any(|t| t == "image/png");
-    let mut count: usize = 0;
-
-    // The one real contribution: advertise image/png when the clipboard only
-    // has a BMP, so Claude Code's paste path tries the PNG MIME first and we
-    // can hand back a converted PNG from output().
-    if has_bmp && !has_png {
-        println!("image/png");
-        count += 1;
+fn print_targets() -> io::Result<()> {
+    let types = wl_list_types()?;
+    let targets = advertised_targets(&types);
+    if targets.is_empty() {
+        return Err(io::Error::other("clipboard has no supported targets"));
     }
+    let mut text = targets.join("\n");
+    text.push('\n');
+    write_stdout(text.as_bytes())
+}
 
-    for t in &types {
-        match t.as_str() {
-            "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp" => {
-                println!("{t}");
-                count += 1;
-                if t == "image/jpeg" {
-                    println!("image/jpg");
-                    count += 1;
-                }
+/// The one real contribution of this tool: advertise `image/png` when the
+/// clipboard only offers a BMP, so Claude Code's paste path asks for PNG and
+/// `output()` can hand back a converted one.
+fn advertised_targets(types: &[String]) -> Vec<&str> {
+    let has = |mime: &str| types.iter().any(|t| t == mime);
+    let mut targets = Vec::new();
+    if has("image/bmp") && !has("image/png") {
+        targets.push("image/png");
+    }
+    for t in types.iter().map(String::as_str) {
+        match t {
+            "image/png" | "image/gif" | "image/webp" | "image/bmp" => targets.push(t),
+            "image/jpeg" => {
+                targets.push(t);
+                targets.push("image/jpg");
             }
-            s if s.starts_with("text/") => {
-                println!("{t}");
-                count += 1;
-            }
+            _ if t.starts_with("text/") => targets.push(t),
             _ => {}
         }
     }
-
-    i32::from(count == 0)
+    targets
 }
 
-fn output(mime: &str) -> i32 {
+fn output(mime: &str) -> io::Result<()> {
     match mime {
         m if m.starts_with("text/") => passthrough(m),
         // Try PNG directly first. On WSLg the clipboard only advertises BMP,
         // so this call fails fast and we fall through to the BMP decoder.
-        "image/png" => wl_fetch("image/png").map_or_else(|_| bmp_to_png(), |d| write_stdout(&d)),
+        "image/png" => {
+            wl_fetch("image/png").map_or_else(|_| output_bmp_as_png(), |png| write_stdout(&png))
+        }
         "image/jpg" => passthrough("image/jpeg"),
         "image/jpeg" | "image/gif" | "image/webp" | "image/bmp" => passthrough(mime),
-        _ => {
-            eprintln!("xclip: unsupported MIME type: {mime}");
-            1
-        }
+        _ => Err(io::Error::other(format!("unsupported MIME type: {mime}"))),
     }
 }
 
-fn passthrough(mime: &str) -> i32 {
-    match wl_fetch(mime) {
-        Ok(d) => write_stdout(&d),
-        Err(e) => {
-            eprintln!("xclip: wl-paste -t {mime} failed: {e}");
-            1
-        }
-    }
+fn passthrough(mime: &str) -> io::Result<()> {
+    let data = wl_fetch(mime)?;
+    write_stdout(&data)
 }
 
-fn bmp_to_png() -> i32 {
-    let bmp = match wl_fetch("image/bmp") {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("xclip: wl-paste -t image/bmp failed: {e}");
-            return 1;
-        }
-    };
-    let img = match image::load_from_memory(&bmp) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("xclip: BMP decode failed: {e}");
-            return 1;
-        }
-    };
-    let mut buf = Cursor::new(Vec::new());
-    if let Err(e) = img.write_to(&mut buf, ImageFormat::Png) {
-        eprintln!("xclip: PNG encode failed: {e}");
-        return 1;
-    }
-    write_stdout(&buf.into_inner())
+fn output_bmp_as_png() -> io::Result<()> {
+    let bmp = wl_fetch("image/bmp")?;
+    let png = bmp_to_png(&bmp)?;
+    write_stdout(&png)
 }
 
-fn write_stdout(data: &[u8]) -> i32 {
-    i32::from(io::stdout().write_all(data).is_err())
+fn bmp_to_png(bmp: &[u8]) -> io::Result<Vec<u8>> {
+    let img = image::load_from_memory(bmp)
+        .map_err(|e| io::Error::other(format!("BMP decode failed: {e}")))?;
+    let mut png = Cursor::new(Vec::new());
+    img.write_to(&mut png, ImageFormat::Png)
+        .map_err(|e| io::Error::other(format!("PNG encode failed: {e}")))?;
+    Ok(png.into_inner())
+}
+
+fn write_stdout(data: &[u8]) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    let result = stdout.write_all(data).and_then(|()| stdout.flush());
+    if let Err(e) = result
+        // A closed downstream pipe (e.g. piping into `head`) is not our failure.
+        && e.kind() != io::ErrorKind::BrokenPipe
+    {
+        return Err(io::Error::other(format!("stdout write failed: {e}")));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PNG_MAGIC: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    fn types(list: &[&str]) -> Vec<String> {
+        list.iter().map(ToString::to_string).collect()
+    }
+
+    fn cli(args: &[&str]) -> Cli {
+        parse_args(args.iter().map(ToString::to_string))
+    }
 
     /// Build the smallest `BI_RGB` BMP we can round-trip through `image`.
     /// Two pixels wide, one tall, 24 bits per pixel, no compression. Paired
@@ -309,24 +333,10 @@ mod tests {
         bmp.extend_from_slice(&0u32.to_le_bytes()); // y ppm
         bmp.extend_from_slice(&0u32.to_le_bytes()); // colors used
         bmp.extend_from_slice(&0u32.to_le_bytes()); // important colors
-        // 2 pixels * 3 bytes + 2 pad bytes to align row to 4 bytes
+        // Two pixels stored BGR (blue, green), plus 2 pad bytes to align the
+        // row to 4 bytes.
         bmp.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0]);
         bmp
-    }
-
-    #[test]
-    fn bmp_round_trips_to_png() {
-        let bmp = tiny_bmp();
-        assert_eq!(&bmp[0..2], b"BM");
-        let img = image::load_from_memory(&bmp).expect("load BMP");
-        let mut out = Cursor::new(Vec::new());
-        img.write_to(&mut out, ImageFormat::Png)
-            .expect("encode PNG");
-        let png = out.into_inner();
-        assert_eq!(
-            &png[0..8],
-            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
-        );
     }
 
     /// Build a minimal 32-bpp `BI_BITFIELDS` BMP. This is the variant `WSLg`
@@ -373,19 +383,91 @@ mod tests {
     }
 
     #[test]
+    fn bmp_round_trips_to_png() {
+        let png = bmp_to_png(&tiny_bmp()).expect("convert BI_RGB BMP");
+        assert_eq!(&png[..8], PNG_MAGIC);
+        let img = image::load_from_memory(&png).expect("decode PNG");
+        let rgb = img.to_rgb8();
+        assert_eq!(rgb.get_pixel(0, 0), &image::Rgb([0, 0, 255]));
+        assert_eq!(rgb.get_pixel(1, 0), &image::Rgb([0, 255, 0]));
+    }
+
+    #[test]
     fn bitfields_bmp_round_trips_to_png() {
-        let bmp = tiny_bmp_bitfields();
-        assert_eq!(&bmp[0..2], b"BM");
-        let img = image::load_from_memory(&bmp).expect("load BI_BITFIELDS BMP");
+        let png = bmp_to_png(&tiny_bmp_bitfields()).expect("convert BI_BITFIELDS BMP");
+        assert_eq!(&png[..8], PNG_MAGIC);
+        // Decode back and check the pixels landed on the right channels, so a
+        // red/blue mask mix-up cannot slip through.
+        let img = image::load_from_memory(&png).expect("decode PNG");
         assert_eq!(img.width(), 2);
         assert_eq!(img.height(), 1);
-        let mut out = Cursor::new(Vec::new());
-        img.write_to(&mut out, ImageFormat::Png)
-            .expect("encode PNG");
-        let png = out.into_inner();
+        let rgb = img.to_rgb8();
+        assert_eq!(rgb.get_pixel(0, 0), &image::Rgb([255, 0, 0]));
+        assert_eq!(rgb.get_pixel(1, 0), &image::Rgb([0, 255, 0]));
+    }
+
+    #[test]
+    fn bmp_to_png_rejects_garbage() {
+        assert!(bmp_to_png(b"not a bmp").is_err());
+    }
+
+    #[test]
+    fn targets_synthesizes_png_for_bmp_only_clipboard() {
         assert_eq!(
-            &png[0..8],
-            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+            advertised_targets(&types(&["image/bmp"])),
+            ["image/png", "image/bmp"]
         );
+    }
+
+    #[test]
+    fn targets_does_not_duplicate_existing_png() {
+        assert_eq!(
+            advertised_targets(&types(&["image/png", "image/bmp"])),
+            ["image/png", "image/bmp"]
+        );
+    }
+
+    #[test]
+    fn targets_aliases_jpeg_as_jpg() {
+        assert_eq!(
+            advertised_targets(&types(&["image/jpeg"])),
+            ["image/jpeg", "image/jpg"]
+        );
+    }
+
+    #[test]
+    fn targets_keeps_text_and_drops_unknown() {
+        assert_eq!(
+            advertised_targets(&types(&["text/plain;charset=utf-8", "application/x-foo"])),
+            ["text/plain;charset=utf-8"]
+        );
+    }
+
+    #[test]
+    fn targets_empty_for_unsupported_clipboard() {
+        assert!(advertised_targets(&types(&["application/x-foo"])).is_empty());
+    }
+
+    #[test]
+    fn parses_claude_code_invocation() {
+        let Cli::Run(request) = cli(&["-selection", "clipboard", "-t", "image/png", "-o"]) else {
+            panic!("expected Cli::Run");
+        };
+        assert_eq!(request.mime.as_deref(), Some("image/png"));
+        assert!(request.output);
+    }
+
+    #[test]
+    fn parses_missing_output_flag() {
+        let Cli::Run(request) = cli(&["-t", "TARGETS"]) else {
+            panic!("expected Cli::Run");
+        };
+        assert!(!request.output);
+    }
+
+    #[test]
+    fn help_and_version_flags_win() {
+        assert!(matches!(cli(&["-t", "image/png", "-h"]), Cli::Help));
+        assert!(matches!(cli(&["--version"]), Cli::Version));
     }
 }
